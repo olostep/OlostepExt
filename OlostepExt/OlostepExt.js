@@ -1217,6 +1217,8 @@ var OlostepExt = (function () {
                     return wrapObject(extensionAPIs, staticWrappers, apiMetadata);
                 };
 
+                // @TODO: Refactor
+
                 if (typeof chrome != "object" || !chrome || !chrome.runtime || !chrome.runtime.id) {
                     if (document && document.currentScript && document.currentScript.getAttribute("source-to-retrieve")) {
                         let script_src = document.currentScript.getAttribute("source-to-retrieve");
@@ -1390,7 +1392,11 @@ var OlostepExt = (function () {
                                         let errorDonation = {
                                             "errorDonation": true
                                         }
-                                        postMessage(errorDonation)
+                                        // disabled for now because sometimes the PayPal SDK
+                                        // returns an error even if the payment is just cancelled
+                                        // TODO:Look into the different error codes and see if we can
+                                        // distinguish between a cancelled payment and a real error
+                                        // postMessage(errorDonation)
                                     }
                                 }).render(document.querySelector("#olostep-tip-request-v2").shadowRoot.querySelector('#' + idToAssign));
                             }
@@ -1514,7 +1520,7 @@ You can copy and paste this to your manifest.json file to fix this error:
                             )
                         }
                     )
-                        }
+                }
             })
         }
 
@@ -1534,7 +1540,7 @@ You can copy and paste this to your manifest.json file to fix this error:
             return false
         }
 
-        function requestTipOlostep({theme, image_sidebar, header_text, body_text, support_text, remind_me_later_text, confirm_text_btn, change_amount_text_btn, thank_you_message_header, thank_you_message_body, transaction_failed_header, transaction_failed_body, item, price_per_item, currency, selectable_quantities, initial_currency, converted_currency_bool, target_currency, converted_amount, conversion_multiplier}){
+        function requestTipOlostep({theme, image_sidebar, header_text, body_text, support_text, remind_me_later_text, confirm_text_btn, change_amount_text_btn, thank_you_message_header, thank_you_message_body, transaction_failed_header, transaction_failed_body, item, price_per_item, currency, selectable_quantities, initial_currency, converted_currency_bool, target_currency, converted_amount, conversion_multiplier, suppress_remind_me_later}){
             if(window.innerWidth < 768) return // only if viewport is desktop or tablet
             getPreviousSnoozers().then(
                 async function (snoozersList) {
@@ -1588,6 +1594,7 @@ You can copy and paste this to your manifest.json file to fix this error:
                                                     is_stripe_available: is_stripe_available,
                                                     is_paypal_available: is_paypal_available,
                                                     stripe_id: storage.olostep_ext_stripe_id,
+                                                    suppress_remind_me_later: suppress_remind_me_later
                                                 })
                                             }
                                         )
@@ -1653,38 +1660,43 @@ You can copy and paste this to your manifest.json file to fix this error:
         }
 
         function hookUpTippingJar({
-            htmlHook,
-            theme,
-            image_sidebar,
-            header_text,
-            body_text,
-            support_text,
-            remind_me_later_text,
-            confirm_text_btn,
-            change_amount_text_btn,
-            thank_you_message_header,
-            thank_you_message_body,
-            transaction_failed_header,
-            transaction_failed_body,
-            item,
-            price_per_item,
-            currency,
-            selectable_quantities,
-            initial_currency,
-            converted_currency_bool,
-            target_currency,
-            converted_amount,
-            conversion_multiplier,
-            is_stripe_available,
-            is_paypal_available,
-            stripe_id,
-        }){
+                                      htmlHook,
+                                      theme,
+                                      image_sidebar,
+                                      header_text,
+                                      body_text,
+                                      support_text,
+                                      remind_me_later_text,
+                                      confirm_text_btn,
+                                      change_amount_text_btn,
+                                      thank_you_message_header,
+                                      thank_you_message_body,
+                                      transaction_failed_header,
+                                      transaction_failed_body,
+                                      item,
+                                      price_per_item,
+                                      currency,
+                                      selectable_quantities,
+                                      initial_currency,
+                                      converted_currency_bool,
+                                      target_currency,
+                                      converted_amount,
+                                      conversion_multiplier,
+                                      is_stripe_available,
+                                      is_paypal_available,
+                                      stripe_id,
+                                      suppress_remind_me_later
+                                  }){
             setTimeout(() => {
                 htmlHook.querySelector("#olostep-tipping-window-v3").style.marginRight = "0%"
             }, 500)
 
             htmlHook.getElementById("dismiss-notification-olostep").onclick = function(){
                 hideHtml("olostep-tip-request-v2")
+            }
+
+            if(suppress_remind_me_later){
+                htmlHook.querySelector("#remind-me-theguardian-window").style.display = "none"
             }
 
             htmlHook.querySelector("#remind-me-theguardian-window").onclick = async function(){
@@ -1763,6 +1775,7 @@ You can copy and paste this to your manifest.json file to fix this error:
             let amount_tip_fintech = price_per_item * multiplier_first_amount // to be sent to STRIPE or PAYPAL
             let amount_tip_display = price_int_per_item * multiplier_first_amount
             injectPayPalBTN(amount_tip_fintech, currency, thank_you_message_header, thank_you_message_body, transaction_failed_header, transaction_failed_body)
+            checkSelectedAmount(htmlHook, 1, theme.primary_color, theme.secondary_color)
             htmlHook.querySelector("#amount-first").onclick = function(){
                 checkSelectedAmount(htmlHook, 1, theme.primary_color, theme.secondary_color)
                 amount_tip_fintech = price_per_item * multiplier_first_amount
@@ -2287,6 +2300,7 @@ You can copy and paste this to your manifest.json file to fix this error:
                                         image_sidebar,
                                         theme_color = "web-blue", // or custom: primary_color, secondary_color
                                         counter = false, // {"action_id": "1232", "trigger_on_nth_occurrence": 2}, still in development
+                                        suppress_remind_me_later = false
                                     }) {
                         currency = currency.toUpperCase();
                         let storage = await get(['olostep_ext_stripe_id', 'olostep_ext_paypal_id']);
@@ -2345,7 +2359,8 @@ You can copy and paste this to your manifest.json file to fix this error:
                                     converted_currency_bool: converted_currency_bool,
                                     target_currency: target_currency,
                                     converted_amount: converted_amount,
-                                    conversion_multiplier: conversion_multiplier
+                                    conversion_multiplier: conversion_multiplier,
+                                    suppress_remind_me_later: suppress_remind_me_later
                                 })
                             }).catch(
                             function (error) {
@@ -2371,7 +2386,8 @@ You can copy and paste this to your manifest.json file to fix this error:
                                     converted_currency_bool: false,
                                     target_currency: null,
                                     converted_amount: null,
-                                    conversion_multiplier: null
+                                    conversion_multiplier: null,
+                                    suppress_remind_me_later: suppress_remind_me_later
                                 })
                             }
                         )
