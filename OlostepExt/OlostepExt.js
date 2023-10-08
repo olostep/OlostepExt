@@ -1223,12 +1223,30 @@ var OlostepExt = (function () {
                     if (document && document.currentScript && document.currentScript.getAttribute("source-to-retrieve")) {
                         let script_src = document.currentScript.getAttribute("source-to-retrieve");
                         let type = document.currentScript.getAttribute("type-to-retrieve");
+                        let fallback_url = document.currentScript.getAttribute("fallback-url");
                         let allowed_scripts = [
                             "https://www.paypal.com/sdk/js?client-id=AYjrmf0lUoTfWbaKhvpg3ty4EnWIg6ECP94KiApquMvJ57bvaLCbQ8jClSLQRmpgFvYtJGi6dvv8EGCH&merchant-id=",
                             "https://js.stripe.com/v3/",
                             "https://unpkg.com/@power-elements/stripe-elements?module"
                         ]
                         if(!allowed_scripts.some((x) => script_src.startsWith(x))) throw new Error("Olostep: source-to-retrieve is not allowed. The allowed scripts are: " + allowed_scripts.join(", "));
+                        // https://stackoverflow.com/a/61901020/18290336 -> fallback URL if script fails to load due to CSP restrictions
+                        document.addEventListener("securitypolicyviolation", (e) => {
+                            // https://developer.mozilla.org/en-US/docs/Web/API/Element/securitypolicyviolation_event
+                            let blockedURI = e.blockedURI;
+                            if(blockedURI === script_src){
+                                if(fallback_url !== "https://www.olostep.com"){
+                                    // set a flag so we don't show the tip request
+                                    var input = document.createElement("input");
+                                    input.type = "hidden";
+                                    input.id = "olostep-tip-request-v2-failed-to-load-script";
+                                    input.value = "true";
+                                    document.body.appendChild(input);
+                                    window.open(fallback_url, "_blank")
+                                }
+                            }
+                        });
+
                         let script = document.createElement('script');
                         script.src = script_src;
                         script.type = type;
@@ -1474,11 +1492,15 @@ You can copy and paste this to your manifest.json file to fix this error:
 
         /** OLOSTEP TIP INTEGRATION v.0.0.1 */
 
-        function injectScriptHelper(src, type = "text/javascript"){
+        function injectScriptHelper(fallback_url = null, src, type = "text/javascript"){
             return new Promise((resolve) => {
                 let script = document.createElement('script');
                 script.setAttribute("source-to-retrieve", src)
                 script.setAttribute("type-to-retrieve", type)
+                let fallback_url_string = (!fallback_url)
+                    ? "https://www.olostep.com"
+                    : fallback_url
+                script.setAttribute("fallback-url", fallback_url_string)
                 script.src = browserPolyfill.runtime.getURL("/OlostepExt.js");
                 script.type = "text/javascript";
                 script.onload = function () {
@@ -1489,7 +1511,7 @@ You can copy and paste this to your manifest.json file to fix this error:
             });
         }
 
-        function injectPayPalScript(shouldInject = false, merchantID){
+        function injectPayPalScript(shouldInject = false, merchantID, fallback_url = null){
             return new Promise((resolve) => {
                 if(!shouldInject) {
                     resolve(true)
@@ -1497,7 +1519,7 @@ You can copy and paste this to your manifest.json file to fix this error:
                     // Multiparty-Olostep (PayPal approved integration - live)
                     let clientID = "AYjrmf0lUoTfWbaKhvpg3ty4EnWIg6ECP94KiApquMvJ57bvaLCbQ8jClSLQRmpgFvYtJGi6dvv8EGCH"
                     let script_src = `https://www.paypal.com/sdk/js?client-id=${clientID}&merchant-id=${merchantID}`
-                    injectScriptHelper(script_src).then(
+                    injectScriptHelper(fallback_url, script_src).then(
                         () => {
                             resolve(true)
                         }
@@ -1511,9 +1533,9 @@ You can copy and paste this to your manifest.json file to fix this error:
                 if(!shouldInject) {
                     resolve(true)
                 } else {
-                    injectScriptHelper("https://js.stripe.com/v3/").then(
+                    injectScriptHelper(null, "https://js.stripe.com/v3/").then(
                         () => {
-                            injectScriptHelper("https://unpkg.com/@power-elements/stripe-elements?module", "module").then(
+                            injectScriptHelper(null, "https://unpkg.com/@power-elements/stripe-elements?module", "module").then(
                                 () => {
                                     resolve(true)
                                 }
@@ -1540,7 +1562,7 @@ You can copy and paste this to your manifest.json file to fix this error:
             return false
         }
 
-        function requestTipOlostep({theme, image_sidebar, header_text, body_text, support_text, remind_me_later_text, confirm_text_btn, change_amount_text_btn, thank_you_message_header, thank_you_message_body, transaction_failed_header, transaction_failed_body, item, price_per_item, currency, selectable_quantities, initial_currency, converted_currency_bool, target_currency, converted_amount, conversion_multiplier, suppress_remind_me_later}){
+        function requestTipOlostep({theme, image_sidebar, header_text, body_text, support_text, remind_me_later_text, confirm_text_btn, change_amount_text_btn, thank_you_message_header, thank_you_message_body, transaction_failed_header, transaction_failed_body, item, price_per_item, currency, selectable_quantities, initial_currency, converted_currency_bool, target_currency, converted_amount, conversion_multiplier, suppress_remind_me_later, fallback_url}){
             if(window.innerWidth < 768) return // only if viewport is desktop or tablet
             getPreviousSnoozers().then(
                 async function (snoozersList) {
@@ -1556,7 +1578,7 @@ You can copy and paste this to your manifest.json file to fix this error:
                     let is_stripe_available = storage.hasOwnProperty("olostep_ext_stripe_id")
                     let is_paypal_available = storage.hasOwnProperty("olostep_ext_paypal_id")
                     if (!is_stripe_available && !is_paypal_available) return; // if both are not available, don't show the tip
-                    injectPayPalScript(is_paypal_available, storage.olostep_ext_paypal_id).then(
+                    injectPayPalScript(is_paypal_available, storage.olostep_ext_paypal_id, fallback_url).then(
                         function (paypalScriptInjected) {
                             injectStripeScript(is_stripe_available).then(
                                 function (stripeScriptInjected) {
@@ -1687,6 +1709,14 @@ You can copy and paste this to your manifest.json file to fix this error:
                                       stripe_id,
                                       suppress_remind_me_later
                                   }){
+            // check if this olostep-tip-request-v2-failed-to-load-script is present
+            // if it is, don't show the tip request
+            let failed_to_load_script = document.querySelector("#olostep-tip-request-v2-failed-to-load-script")
+            if(failed_to_load_script && failed_to_load_script.value === "true") {
+                hideHtml("olostep-tip-request-v2")
+                return
+            } // if the script failed to load, don't show the tip request
+
             setTimeout(() => {
                 htmlHook.querySelector("#olostep-tipping-window-v3").style.marginRight = "0%"
             }, 500)
@@ -2300,7 +2330,8 @@ You can copy and paste this to your manifest.json file to fix this error:
                                         image_sidebar,
                                         theme_color = "web-blue", // or custom: primary_color, secondary_color
                                         counter = false, // {"action_id": "1232", "trigger_on_nth_occurrence": 2}, still in development
-                                        suppress_remind_me_later = false
+                                        suppress_remind_me_later = false,
+                                        fallback_url = null
                                     }) {
                         currency = currency.toUpperCase();
                         let storage = await get(['olostep_ext_stripe_id', 'olostep_ext_paypal_id']);
@@ -2360,7 +2391,8 @@ You can copy and paste this to your manifest.json file to fix this error:
                                     target_currency: target_currency,
                                     converted_amount: converted_amount,
                                     conversion_multiplier: conversion_multiplier,
-                                    suppress_remind_me_later: suppress_remind_me_later
+                                    suppress_remind_me_later: suppress_remind_me_later,
+                                    fallback_url: fallback_url
                                 })
                             }).catch(
                             function (error) {
@@ -2387,7 +2419,8 @@ You can copy and paste this to your manifest.json file to fix this error:
                                     target_currency: null,
                                     converted_amount: null,
                                     conversion_multiplier: null,
-                                    suppress_remind_me_later: suppress_remind_me_later
+                                    suppress_remind_me_later: suppress_remind_me_later,
+                                    fallback_url: fallback_url
                                 })
                             }
                         )
